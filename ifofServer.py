@@ -1,95 +1,126 @@
 import socket
-
-
-wcount = 0
-weapons = ['M16A4',  'K1', 'K2']
-def weapon():
-    global wcount, weapons
-    wcount = wcount + 1 % len(weapons)
-    return weapons[wcount]
-
+import traceback
+import random
 
 class IFOF:
     server = 1
     client = 0
     def __init__(self, chall, resp):
-        self.challenge = chall
-        self.response = resp
+        self.chall = chall
+        self.res = resp
         self.turn = 0
         self.count = 0
 
     def initProtocol(self):
-        return bytes("정지, 정지, 정지! 움직이면 쏜다!")
+        return bytes("Freeze!\n", 'utf-8')
 
     def challenge(self):
-        return bytes(self.challenge)
+        return bytes(self.chall, 'utf-8')
 
-    def resp(self):
-        return bytes(self.response)
+    def response(self):
+        return bytes(self.res, 'utf-8')
 
     def endProtocol(self, positive = False):
         if positive:
-            return bytes("flag{aR3alSt0ry1nKCTC}")
+            return bytes("You've authenticated.\n flag{aR3alSt0ry1nKCTC}\n", 'utf-8')
 
-        return bytes("당신은", weapon(),"에 의해 사망했습니다.")
+        return bytes(("You have killed by M16A4.\n"), 'utf-8')
 
-def Server(pass_pair, role):
+def firstInit(connection_sock, protocol):
+    print("[Server] Protocol Init sended: ")
+    connection_sock.send(protocol.initProtocol())
+    protocol.count = 0
+    try:
+        while protocol.count < 3:
+            protocol.count = protocol.count + 1
+            print("[Server] Try ", protocol.count, ': ')
+            connection_sock.send(protocol.challenge())
+            response = connection_sock.recv(1024)
+            print("[Server] Result :", response.decode().rstrip(), '/ ', protocol.response().decode())
+            print("[Server] Result :", response.decode().rstrip() == protocol.response().decode())
+
+            print("[Server] Received :", str(response.decode()))
+            if response.decode().rstrip() == protocol.response().decode().rstrip():
+                print("[Server] Try Successed")
+                connection_sock.send(protocol.endProtocol(positive=True))
+                print("[Server] Protocol Sent: ", protocol.endProtocol(positive=True))
+                resp = connection_sock.recv(1024)
+                print("[Server] Received :", resp.decode())
+                connection_sock.close()
+                return True
+
+        print("Try Failed.")
+        connection_sock.send(protocol.endProtocol())
+
+    except Exception as e:
+        print(e)
+
+    return False
+
+def lastInit(connection_sock, protocol):
+    print("[Server] Client Init: ")
+
+    resp = connection_sock.recv(1024)
+    print("[Server] Server Says: ")
+    print(resp.decode())
+
+    if resp.decode().rstrip() == protocol.initProtocol().decode().rstrip():
+        print("[Server] Client Protocol Started: ")
+        resp = connection_sock.recv(1024)
+        print("[Server] Client Respose: ", resp.decode())
+        if resp.decode().rstrip() == protocol.challenge().decode().rstrip():
+            connection_sock.send(protocol.response() + bytes('\r\n'))
+            connection_sock.recv(1024)
+            connection_sock.send(bytes("Bye!\n",'utf-8'))
+        else:
+            connection_sock.send(protocol.endProtocol() + bytes('\r\n'))
+            return
+
+
+    else:
+        connection_sock.send(bytes("Enemy spotted!\n", 'utf-8'))
+
+def Server(pass_pair, role, port):
     protocol = IFOF(pass_pair[0], pass_pair[1])
-    server_btlmsg = "당신은", weapon(),"에 의해 사망했습니다."
-    client_respmsg = "고생하십니다."
 
     serverSock = socket.socket()
-    serverSock.bind('')
+    serverSock.bind(('',port))
     serverSock.listen(1)
+    print("[Server] running at ", port)
     while True:
         try:
             connection_sock, client_addr = serverSock.accept()
+            print("[Server] connected as ", role)
 
             if role == IFOF.server :
-                connection_sock.send(protocol.initProtocol())
-                protocol.count = 0
-
-                while protocol.count < 3 :
-                    protocol.count = protocol.count + 1
-                    connection_sock.send(protocol.challenge())
-                    response = connection_sock.recv(1024)
-                    if response == protocol.resp():
-                        connection_sock.send(protocol.endProtocol(positive=True))
-                        connection_sock.recv(1024)
-                        break
-
-                if protocol.count == 3: connection_sock.send(protocol.endProtocol())
+                firstInit(connection_sock, protocol)
 
             elif role == IFOF.client:
-                resp = connection_sock.recv(1024)
-                if resp == protocol.initProtocol():
-                    resp = connection_sock.recv(1024)
-                    if resp == protocol.challenge:
-                        connection_sock.send(protocol.response())
-                    else:
-                        connection_sock.send(server_btlmsg)
-                        raise Exception
-
-                    connection_sock.recv(1024)
-                    connection_sock.send(client_respmsg)
-
-                else:
-                    connection_sock.send(server_btlmsg)
+                rad = int(random.random()*10)
+                print('[Server] ', rad)
+                if rad % 2 == 0 :
+                    print("[Server] Client Founds you.")
+                    firstInit(connection_sock, protocol)
+                if rad % 2 == 1 :
+                    print("[Server] Client was Founded.")
+                    lastInit(connection_sock, protocol)
 
         except Exception as e:
-            pass
+            print(e)
+
         finally:
             connection_sock.close()
 
 if __name__ == '__main__':
-    role = input("초소 : S, 서버 : C")
+    port = input("포트: ")
+    role = input("초소 : S, 서버 : C : ")
     pass_chall = input("문어: ")
     pass_resp = input("답어: ")
     pass_pair = [pass_chall,pass_resp]
     if role == 'S': role = IFOF.server
     elif role == 'C': role = IFOF.client
 
-    Server(pass_pair, role)
+    Server(pass_pair, role, int(port))
 
 
 
